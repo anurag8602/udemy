@@ -1,342 +1,538 @@
 https://docs.google.com/document/d/14koGKcVcRqgSDXqf5ziaHeAJ3vWUC60o_v1OIIckvFg/edit?addon_store&tab=t.0
 
-
-
 // ===============================
 // Milestone 1: Spring Boot JWT Authentication Setup
+// Generated on Tuesday, July 22, 2025, 10:50 PM IST
 // ===============================
 
-package com.example.demo;
+package com.hashedin.huspark;
 
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import jakarta.persistence.*;
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;
+import lombok.Data;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.authentication.*;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.*;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.filter.OncePerRequestFilter;
-import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.security.Key;
 import java.util.Collections;
 import java.util.Date;
+import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 
 // ===============================
 // Application Entry Point
 // ===============================
 
 @SpringBootApplication
-public class DemoApplication {
+public class HusparkApplication {
     public static void main(String[] args) {
-        SpringApplication.run(DemoApplication.class, args);
+        SpringApplication.run(HusparkApplication.class, args);
     }
 }
 
 // ===============================
-// Role Enum
+// Roles Enum
 // ===============================
 
-enum Role {
-    ADMIN,
-    INSTRUCTOR,
-    STUDENT
+package com.hashedin.huspark.constants;
+
+public enum Roles {
+    STUDENT,
+    TEACHER,
+    ADMIN
 }
 
 // ===============================
 // User Entity
 // ===============================
 
+package com.hashedin.huspark.model;
+
+import com.hashedin.huspark.constants.Roles;
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 @Entity
 @Table(name = "users")
-class User {
+public class User {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true)
+    @Column(unique = true, nullable = false)
     private String email;
 
-    @Column(nullable = false)
-    private String password;
+    @Column(unique = true, nullable = false)
+    private String username;
 
-    private String fullName;
+    @Column(nullable = false)
+    private String pwd;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private Role role;
-
-    // Getters and setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public String getEmail() { return email; }
-    public void setEmail(String email) { this.email = email; }
-
-    public String getPassword() { return password; }
-    public void setPassword(String password) { this.password = password; }
-
-    public String getFullName() { return fullName; }
-    public void setFullName(String fullName) { this.fullName = fullName; }
-
-    public Role getRole() { return role; }
-    public void setRole(Role role) { this.role = role; }
+    private Roles role;
 }
 
 // ===============================
-// User Repository
+// UserDao DTO
 // ===============================
 
+package com.hashedin.huspark.dao;
+
+import com.hashedin.huspark.constants.Roles;
+import lombok.Data;
+
+@Data
+public class UserDao {
+    private Long id;
+    private String username;
+    private Roles role;
+    private String email;
+}
+
+// ===============================
+// UserRepository Interface
+// ===============================
+
+package com.hashedin.huspark.repository;
+
+import com.hashedin.huspark.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
 
-interface UserRepository extends JpaRepository<User, Long> {
-    Optional<User> findByEmail(String email);
-    boolean existsByEmail(String email);
+import java.util.Optional;
+
+@Repository
+public interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByUsername(String username);
 }
 
 // ===============================
-// DTO Classes
+// CustomUserDetailsService (UserDetailsService Implementation)
 // ===============================
 
-class RegisterRequest {
-    private String email;
-    private String fullName;
-    private String password;
+package com.hashedin.huspark.service;
 
-    public String getEmail() { return email; }
-    public void setEmail(String email) { this.email = email; }
+import com.hashedin.huspark.model.User;
+import com.hashedin.huspark.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.*;
+import org.springframework.stereotype.Service;
 
-    public String getFullName() { return fullName; }
-    public void setFullName(String fullName) { this.fullName = fullName; }
-
-    public String getPassword() { return password; }
-    public void setPassword(String password) { this.password = password; }
-}
-
-class LoginRequest {
-    private String email;
-    private String password;
-
-    public String getEmail() { return email; }
-    public void setEmail(String email) { this.email = email; }
-
-    public String getPassword() { return password; }
-    public void setPassword(String password) { this.password = password; }
-}
-
-class JwtResponse {
-    private String token;
-
-    public JwtResponse(String token) {
-        this.token = token;
-    }
-
-    public String getToken() { return token; }
-    public void setToken(String token) { this.token = token; }
-}
-
-// ===============================
-// JwtService - JWT Utility Class
-// ===============================
+import java.util.List;
+import java.util.Optional;
 
 @Service
-class JwtService {
-    private static final String SECRET = "replace_with_a_long_and_secure_secret_key_which_is_at_least_256_bits";
-    private static final long EXPIRATION = 86400000L; // 1 day in milliseconds
+public class CustomUserDetailsService implements UserDetailsService {
+    @Autowired
+    private UserRepository userRepo;
 
-    private Key getSigningKey() {
-        return Keys.hmacShaKeyFor(SECRET.getBytes());
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        Optional<User> userDet = userRepo.findByUsername(username);
+        if (userDet.isEmpty()) throw new UsernameNotFoundException("User Not Found");
+        User user = userDet.get();
+        List<SimpleGrantedAuthority> authorities = List.of(
+                new SimpleGrantedAuthority("ROLE_" + user.getRole().name())
+        );
+        return new org.springframework.security.core.userdetails.User(user.getUsername(), user.getPwd(), authorities);
+    }
+}
+
+// ===============================
+// UserService
+// ===============================
+
+package com.hashedin.huspark.service;
+
+import com.hashedin.huspark.dao.UserDao;
+import com.hashedin.huspark.model.User;
+import com.hashedin.huspark.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.Optional;
+
+@Service
+public class UserService {
+    @Autowired
+    private UserRepository userRepository;
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    public UserDao createUser(User user) {
+        user.setPwd(passwordEncoder.encode(user.getPwd()));
+        User savedUser = userRepository.save(user);
+        UserDao userDao = new UserDao();
+        userDao.setId(savedUser.getId());
+        userDao.setEmail(savedUser.getEmail());
+        userDao.setUsername(savedUser.getUsername());
+        userDao.setRole(savedUser.getRole());
+        return userDao;
     }
 
-    public String generateToken(String username) {
-        return Jwts.builder()
-                .setSubject(username)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION))
-                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
-                .compact();
+    public List<User> getAllUsers() {
+        return userRepository.findAll();
     }
+
+    public Optional<User> getUserById(Long id) {
+        return userRepository.findById(id);
+    }
+
+    public Optional<User> getUserByUsername(String username) {
+        return userRepository.findByUsername(username);
+    }
+
+    public boolean deleteUser(Long id) {
+        if (userRepository.existsById(id)) {
+            userRepository.deleteById(id);
+            return true;
+        }
+        return false;
+    }
+
+    public User updateUser(Long id, User userDetails) {
+        Optional<User> optionalUser = userRepository.findById(id);
+        if (optionalUser.isPresent()) {
+            User currentUser = optionalUser.get();
+            currentUser.setUsername(userDetails.getUsername());
+            currentUser.setRole(userDetails.getRole());
+            currentUser.setEmail(userDetails.getEmail());
+            if (userDetails.getPwd() != null && !userDetails.getPwd().isEmpty()) {
+                currentUser.setPwd(passwordEncoder.encode(userDetails.getPwd()));
+            }
+            return userRepository.save(currentUser);
+        }
+        return null;
+    }
+}
+
+// ===============================
+// JwtUtil - JWT Utilities
+// ===============================
+
+package com.hashedin.huspark.utils;
+
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Component;
+
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+import java.util.Date;
+import java.util.function.Function;
+
+@Component
+public class JwtUtil {
+    private final String SECRET = "mysecretkeymysecretkeymysecretkeymysecretkey";
 
     public String extractUsername(String token) {
-        return Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody()
-                .getSubject();
+        return extractClaim(token, Claims::getSubject);
     }
 
-    public boolean validateToken(String token, String username) {
-        return extractUsername(token).equals(username) && !isTokenExpired(token);
+    public <T> T extractClaim(String token, Function<Claims, T> resolver) {
+        final Claims claims = Jwts.parser()
+                                 .setSigningKey(getSigningKey())
+                                 .parseClaimsJws(token)
+                                 .getBody();
+        return resolver.apply(claims);
+    }
+
+    private SecretKey getSigningKey() {
+        byte[] keyBytes = SECRET.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return new SecretKeySpec(keyBytes, SignatureAlgorithm.HS256.getJcaName());
+    }
+
+    public String generateToken(UserDetails userDetails) {
+        return Jwts.builder()
+                   .setSubject(userDetails.getUsername())
+                   .claim("roles", userDetails.getAuthorities().stream()
+                                 .map(GrantedAuthority::getAuthority).toList())
+                   .setIssuedAt(new Date())
+                   .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60))
+                   .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                   .compact();
+    }
+
+    public boolean validateToken(String token, UserDetails userDetails) {
+        return (extractUsername(token).equals(userDetails.getUsername())) && !isTokenExpired(token);
     }
 
     private boolean isTokenExpired(String token) {
-        Date expiration = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody()
-                .getExpiration();
-        return expiration.before(new Date());
+        return extractClaim(token, Claims::getExpiration).before(new Date());
     }
 }
 
 // ===============================
-// UserService - Business Logic
+// JwtRequestFilter - JWT Authentication Filter
 // ===============================
 
-@Service
-class UserService {
-    private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
+package com.hashedin.huspark.utils;
 
-    public UserService(UserRepository userRepository,
-                       PasswordEncoder passwordEncoder) {
-        this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
-    }
+import com.hashedin.huspark.service.CustomUserDetailsService;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+import java.io.IOException;
 
-    public void register(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.getEmail())) {
-            // Could add detailed error handling
-            return;
-        }
-        User user = new User();
-        user.setEmail(request.getEmail());
-        user.setFullName(request.getFullName());
-        user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setRole(Role.STUDENT); // Default role at registration
-        userRepository.save(user);
-    }
+@Component
+public class JwtRequestFilter extends OncePerRequestFilter {
 
-    public User loadUserByEmail(String email) {
-        return userRepository.findByEmail(email).orElse(null);
-    }
-}
-
-// ===============================
-// JwtAuthFilter - Authentication Filter
-// ===============================
-
-class JwtAuthFilter extends OncePerRequestFilter {
-    private final JwtService jwtService;
-    private final UserService userService;
-
-    public JwtAuthFilter(JwtService jwtService, UserService userService) {
-        this.jwtService = jwtService;
-        this.userService = userService;
-    }
+    @Autowired
+    private CustomUserDetailsService userDetailsService;
+    @Autowired
+    private JwtUtil jwtUtil;
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
-        String headerAuth = request.getHeader("Authorization");
-        String jwt = (headerAuth != null && headerAuth.startsWith("Bearer ")) ? headerAuth.substring(7) : null;
-        if (jwt != null) {
-            String username = jwtService.extractUsername(jwt);
-            if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                User user = userService.loadUserByEmail(username);
-                if (user != null && jwtService.validateToken(jwt, user.getEmail())) {
-                    UsernamePasswordAuthenticationToken authToken =
-                            new UsernamePasswordAuthenticationToken(user, null, Collections.emptyList());
-                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(authToken);
-                }
+    protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
+            throws ServletException, IOException {
+        final String authHeader = req.getHeader("Authorization");
+
+        String username = null;
+        String jwt = null;
+
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            jwt = authHeader.substring(7);
+            username = jwtUtil.extractUsername(jwt);
+        }
+
+        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+            UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+            if (jwtUtil.validateToken(jwt, userDetails)) {
+                UsernamePasswordAuthenticationToken authToken =
+                    new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
+                SecurityContextHolder.getContext().setAuthentication(authToken);
             }
         }
-        filterChain.doFilter(request, response);
+        chain.doFilter(req, res);
     }
 }
 
 // ===============================
-// Security Configuration
+// SecurityConfig - Spring Security Configuration
 // ===============================
 
-@Configuration
-class SecurityConfig {
-    private final JwtAuthFilter jwtAuthFilter;
+package com.hashedin.huspark.utils;
 
-    // Inject JwtAuthFilter via constructor
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
-        this.jwtAuthFilter = jwtAuthFilter;
+import com.hashedin.huspark.service.CustomUserDetailsService;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity
+public class SecurityConfig {
+
+    private final JwtRequestFilter jwtRequestFilter;
+
+    public SecurityConfig(JwtRequestFilter jwtRequestFilter) {
+        this.jwtRequestFilter = jwtRequestFilter;
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        http
-            .csrf(csrf -> csrf.disable())
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/**").permitAll()
-                .anyRequest().authenticated()
-            )
-            .sessionManagement(sess ->
-                    sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
-
-        return http.build();
+    public UserDetailsService userDetailsService() {
+        return new CustomUserDetailsService();
     }
 
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
+
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
+        return config.getAuthenticationManager();
+    }
+
+    @Bean
+    public AuthenticationProvider authenticationProvider(UserDetailsService userDetailsService,
+                                                         PasswordEncoder passwordEncoder) {
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
+        provider.setUserDetailsService(userDetailsService);
+        provider.setPasswordEncoder(passwordEncoder);
+        return provider;
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http.csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/auth/**").permitAll()
+                .anyRequest().authenticated()
+            )
+            .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .addFilterBefore(jwtRequestFilter, UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
 }
 
 // ===============================
-// AuthController - Registration and Login endpoints
+// AuthController - Login Endpoint
 // ===============================
+
+package com.hashedin.huspark.controller;
+
+import com.hashedin.huspark.service.CustomUserDetailsService;
+import com.hashedin.huspark.utils.JwtUtil;
+import lombok.Data;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.*;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/auth")
-class AuthController {
-    private final UserService userService;
-    private final JwtService jwtService;
-    private final PasswordEncoder passwordEncoder;
+public class AuthController {
 
-    public AuthController(UserService userService,
-                          JwtService jwtService,
-                          PasswordEncoder passwordEncoder) {
-        this.userService = userService;
-        this.jwtService = jwtService;
-        this.passwordEncoder = passwordEncoder;
-    }
-
-    @PostMapping("/register")
-    public ResponseEntity<String> register(@RequestBody RegisterRequest request) {
-        if (request.getEmail() == null || request.getPassword() == null) {
-            return ResponseEntity.badRequest().body("Email and password are required");
-        }
-        if (userService.loadUserByEmail(request.getEmail()) != null) {
-            return ResponseEntity.badRequest().body("Email already in use");
-        }
-        userService.register(request);
-        return ResponseEntity.ok("Registration successful");
-    }
+    @Autowired
+    private AuthenticationManager authenticationManager;
+    @Autowired
+    private CustomUserDetailsService userDetailsService;
+    @Autowired
+    private JwtUtil jwtUtil;
 
     @PostMapping("/login")
-    public ResponseEntity<JwtResponse> login(@RequestBody LoginRequest request) {
-        User user = userService.loadUserByEmail(request.getEmail());
-        if (user != null && passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            String token = jwtService.generateToken(user.getEmail());
-            return ResponseEntity.ok(new JwtResponse(token));
+    public ResponseEntity<?> login(@RequestBody AuthRequest authRequest) {
+        authenticationManager.authenticate(
+            new UsernamePasswordAuthenticationToken(authRequest.getUsername(), authRequest.getPassword())
+        );
+        UserDetails userDetails = userDetailsService.loadUserByUsername(authRequest.getUsername());
+        String token = jwtUtil.generateToken(userDetails);
+        return ResponseEntity.ok(token);
+    }
+
+    @Data
+    public static class AuthRequest {
+        private String username;
+        private String password;
+    }
+}
+
+// ===============================
+// UserController - User CRUD APIs
+// ===============================
+
+package com.hashedin.huspark.controller;
+
+import com.hashedin.huspark.dao.UserDao;
+import com.hashedin.huspark.model.User;
+import com.hashedin.huspark.service.UserService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.*;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Optional;
+
+@RestController
+@RequestMapping("/api/users")
+public class UserController {
+
+    @Autowired
+    private UserService userService;
+
+    @PostMapping("sign-up")
+    public ResponseEntity<UserDao> createUser(@RequestBody User user) {
+        UserDao userDao = userService.createUser(user);
+        return new ResponseEntity<>(userDao, HttpStatus.CREATED);
+    }
+
+    @GetMapping
+    public ResponseEntity<List<User>> getAllUsers() {
+        List<User> users = userService.getAllUsers();
+        return new ResponseEntity<>(users, HttpStatus.FOUND);
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<User> getUserById(@PathVariable Long id) {
+        Optional<User> user = userService.getUserById(id);
+        return user.map(value -> new ResponseEntity<>(value, HttpStatus.FOUND))
+                   .orElseGet(() -> new ResponseEntity<>(HttpStatus.NOT_FOUND));
+    }
+
+    @GetMapping("/username/{username}")
+    public ResponseEntity<User> getUserByUsername(@PathVariable String username) {
+        Optional<User> user = userService.getUserByUsername(username);
+        return user.map(value -> new ResponseEntity<>(value, HttpStatus.FOUND))
+                   .orElseGet(() -> new ResponseEntity<>(HttpStatus.NOT_FOUND));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<User> updateUser(@PathVariable Long id, @RequestBody User userDetails) {
+        User updatedUser = userService.updateUser(id, userDetails);
+        if (updatedUser != null) {
+            return new ResponseEntity<>(updatedUser, HttpStatus.OK);
+        } else {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
-        return ResponseEntity.status(401).build();
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteUser(@PathVariable Long id) {
+        boolean deleted = userService.deleteUser(id);
+        if (deleted) {
+            return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+        } else {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
     }
 }
