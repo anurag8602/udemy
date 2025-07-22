@@ -1,0 +1,338 @@
+// ===============================
+// Milestone 1: Spring Boot JWT Authentication Setup
+// ===============================
+
+package com.example.demo;
+
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.security.Keys;
+import jakarta.persistence.*;
+import jakarta.servlet.*;
+import jakarta.servlet.http.*;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.security.Key;
+import java.util.Collections;
+import java.util.Date;
+import java.util.Optional;
+
+// ===============================
+// Application Entry Point
+// ===============================
+
+@SpringBootApplication
+public class DemoApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(DemoApplication.class, args);
+    }
+}
+
+// ===============================
+// Role Enum
+// ===============================
+
+enum Role {
+    ADMIN,
+    INSTRUCTOR,
+    STUDENT
+}
+
+// ===============================
+// User Entity
+// ===============================
+
+@Entity
+@Table(name = "users")
+class User {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String email;
+
+    @Column(nullable = false)
+    private String password;
+
+    private String fullName;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Role role;
+
+    // Getters and setters
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
+
+    public String getFullName() { return fullName; }
+    public void setFullName(String fullName) { this.fullName = fullName; }
+
+    public Role getRole() { return role; }
+    public void setRole(Role role) { this.role = role; }
+}
+
+// ===============================
+// User Repository
+// ===============================
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByEmail(String email);
+    boolean existsByEmail(String email);
+}
+
+// ===============================
+// DTO Classes
+// ===============================
+
+class RegisterRequest {
+    private String email;
+    private String fullName;
+    private String password;
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+
+    public String getFullName() { return fullName; }
+    public void setFullName(String fullName) { this.fullName = fullName; }
+
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
+}
+
+class LoginRequest {
+    private String email;
+    private String password;
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
+}
+
+class JwtResponse {
+    private String token;
+
+    public JwtResponse(String token) {
+        this.token = token;
+    }
+
+    public String getToken() { return token; }
+    public void setToken(String token) { this.token = token; }
+}
+
+// ===============================
+// JwtService - JWT Utility Class
+// ===============================
+
+@Service
+class JwtService {
+    private static final String SECRET = "replace_with_a_long_and_secure_secret_key_which_is_at_least_256_bits";
+    private static final long EXPIRATION = 86400000L; // 1 day in milliseconds
+
+    private Key getSigningKey() {
+        return Keys.hmacShaKeyFor(SECRET.getBytes());
+    }
+
+    public String generateToken(String username) {
+        return Jwts.builder()
+                .setSubject(username)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION))
+                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    public String extractUsername(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .getSubject();
+    }
+
+    public boolean validateToken(String token, String username) {
+        return extractUsername(token).equals(username) && !isTokenExpired(token);
+    }
+
+    private boolean isTokenExpired(String token) {
+        Date expiration = Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .getExpiration();
+        return expiration.before(new Date());
+    }
+}
+
+// ===============================
+// UserService - Business Logic
+// ===============================
+
+@Service
+class UserService {
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+
+    public UserService(UserRepository userRepository,
+                       PasswordEncoder passwordEncoder) {
+        this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+    }
+
+    public void register(RegisterRequest request) {
+        if (userRepository.existsByEmail(request.getEmail())) {
+            // Could add detailed error handling
+            return;
+        }
+        User user = new User();
+        user.setEmail(request.getEmail());
+        user.setFullName(request.getFullName());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setRole(Role.STUDENT); // Default role at registration
+        userRepository.save(user);
+    }
+
+    public User loadUserByEmail(String email) {
+        return userRepository.findByEmail(email).orElse(null);
+    }
+}
+
+// ===============================
+// JwtAuthFilter - Authentication Filter
+// ===============================
+
+class JwtAuthFilter extends OncePerRequestFilter {
+    private final JwtService jwtService;
+    private final UserService userService;
+
+    public JwtAuthFilter(JwtService jwtService, UserService userService) {
+        this.jwtService = jwtService;
+        this.userService = userService;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
+        String headerAuth = request.getHeader("Authorization");
+        String jwt = (headerAuth != null && headerAuth.startsWith("Bearer ")) ? headerAuth.substring(7) : null;
+        if (jwt != null) {
+            String username = jwtService.extractUsername(jwt);
+            if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+                User user = userService.loadUserByEmail(username);
+                if (user != null && jwtService.validateToken(jwt, user.getEmail())) {
+                    UsernamePasswordAuthenticationToken authToken =
+                            new UsernamePasswordAuthenticationToken(user, null, Collections.emptyList());
+                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(authToken);
+                }
+            }
+        }
+        filterChain.doFilter(request, response);
+    }
+}
+
+// ===============================
+// Security Configuration
+// ===============================
+
+@Configuration
+class SecurityConfig {
+    private final JwtAuthFilter jwtAuthFilter;
+
+    // Inject JwtAuthFilter via constructor
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
+        this.jwtAuthFilter = jwtAuthFilter;
+    }
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/auth/**").permitAll()
+                .anyRequest().authenticated()
+            )
+            .sessionManagement(sess ->
+                    sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+
+// ===============================
+// AuthController - Registration and Login endpoints
+// ===============================
+
+@RestController
+@RequestMapping("/api/auth")
+class AuthController {
+    private final UserService userService;
+    private final JwtService jwtService;
+    private final PasswordEncoder passwordEncoder;
+
+    public AuthController(UserService userService,
+                          JwtService jwtService,
+                          PasswordEncoder passwordEncoder) {
+        this.userService = userService;
+        this.jwtService = jwtService;
+        this.passwordEncoder = passwordEncoder;
+    }
+
+    @PostMapping("/register")
+    public ResponseEntity<String> register(@RequestBody RegisterRequest request) {
+        if (request.getEmail() == null || request.getPassword() == null) {
+            return ResponseEntity.badRequest().body("Email and password are required");
+        }
+        if (userService.loadUserByEmail(request.getEmail()) != null) {
+            return ResponseEntity.badRequest().body("Email already in use");
+        }
+        userService.register(request);
+        return ResponseEntity.ok("Registration successful");
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<JwtResponse> login(@RequestBody LoginRequest request) {
+        User user = userService.loadUserByEmail(request.getEmail());
+        if (user != null && passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            String token = jwtService.generateToken(user.getEmail());
+            return ResponseEntity.ok(new JwtResponse(token));
+        }
+        return ResponseEntity.status(401).build();
+    }
+}
